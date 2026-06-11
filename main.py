@@ -2,8 +2,11 @@ import os
 import json
 import logging
 import asyncio
-from dotenv import load_dotenv
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 from flask import Flask, request
 from telegram import Update, Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -287,7 +290,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         score = fuzz.partial_ratio(text.lower(), combined)
         if score >= 70:
             matched.append(r)
-            
+
     if not matched:
         await update.message.reply_text(f"❌ No products found for '*{text}*'", parse_mode="Markdown")
         return
