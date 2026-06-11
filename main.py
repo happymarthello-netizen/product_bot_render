@@ -226,6 +226,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     search_parts = text.lower().split()
     records      = get_products()
 
+    from rapidfuzz import fuzz
     matched = []
     for r in records:
         name      = str(r.get("product_name", "")).lower()
@@ -233,6 +234,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         combined  = name + " " + variation
 
         if all(word in combined for word in search_parts):
+            matched.append(r)
+            continue
+
+        # Fuzzy fallback
+        score = fuzz.partial_ratio(text.lower(), combined)
+        if score >= 70:
             matched.append(r)
 
     if platform_filter:
