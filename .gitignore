@@ -1,0 +1,4 @@
+.env
+voice_message.ogg
+__pycache__/
+*.pyc
