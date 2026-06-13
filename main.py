@@ -77,11 +77,11 @@ def format_currency(value):
 def format_product_full(r):
     return (
         f"📦 *{r.get('product_name', '-')}*\n"
-        f"   Variation : {r.get('variation', '-')}\n"
-        f"   Platform  : {r.get('platform', '-')}\n"
-        f"   COGS      : {format_currency(r.get('cogs', 0))}\n"
-        f"   Price     : {format_currency(r.get('sell_price', 0))}\n"
-        f"   Updated   : {r.get('last_updated', '-')}\n"
+        f"   Variation  : {r.get('variation', '-')}\n"
+        f"   COGS       : {format_currency(r.get('cogs', 0))}\n"
+        f"   Tokopedia  : {format_currency(r.get('sell_price_tokopedia', 0))}\n"
+        f"   Shopee     : {format_currency(r.get('sell_price_shopee', 0))}\n"
+        f"   Updated    : _{r.get('last_updated', '-')}_\n"
     )
 
 def split_into_chunks(text_blocks, max_chars=3500):
