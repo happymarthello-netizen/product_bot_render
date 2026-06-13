@@ -107,13 +107,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         f"👋 Hello {name}!\n\n"
         "Available commands:\n"
-        "  /products — browse products by platform\n"
+        "  /products — browse all products\n"
         "  /secure   — view secure data keys\n\n"
         "🔍 Search tips:\n"
         "  Type a product name to search\n"
-        "  Add /s for Shopee only\n"
-        "  Add /t for Tokopedia only\n"
-        "  e.g. `fufang /s` or `fufang 12 botol /t`"
+        "  Or send a 🎙️ voice message!"
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
 
@@ -122,14 +120,30 @@ async def cmd_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_whitelisted(uid):
         await update.message.reply_text("⛔ You are not authorised.")
         return
-    keyboard = [
-        [
-            InlineKeyboardButton("🛍 Tokopedia", callback_data="platform_tokopedia"),
-            InlineKeyboardButton("🟠 Shopee",    callback_data="platform_shopee"),
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Select a platform:", reply_markup=reply_markup)
+
+    await update.message.reply_text("⏳ Fetching all products...")
+
+    records = get_products()
+
+    if not records:
+        await update.message.reply_text("No products found.")
+        return
+
+    lines = []
+    for r in records:
+        lines.append(f"• {r.get('product_name', '-')} — {r.get('variation', '-')}")
+
+    header = "📋 *All Products:*\n\n"
+    body = "\n".join(lines)
+    full = header + body
+
+    if len(full) > 3500:
+        chunks = split_into_chunks([header] + [l + "\n" for l in lines])
+        await update.message.reply_text(chunks[0], parse_mode="Markdown")
+        for chunk in chunks[1:]:
+            await update.message.reply_text(chunk, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(full, parse_mode="Markdown")
 
 async def callback_platform(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -215,18 +229,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
     # ── Product search ────────────────────────────────────────────────────────
-    platform_filter = None
-    if text.lower().endswith(" /s"):
-        platform_filter = "shopee"
-        text = text[:-3].strip()
-    elif text.lower().endswith(" /t"):
-        platform_filter = "tokopedia"
-        text = text[:-3].strip()
-
+    from rapidfuzz import fuzz
     search_parts = text.lower().split()
     records      = get_products()
 
-    from rapidfuzz import fuzz
     matched = []
     for r in records:
         name      = str(r.get("product_name", "")).lower()
@@ -241,9 +247,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         score = fuzz.partial_ratio(text.lower(), combined)
         if score >= 70:
             matched.append(r)
-
-    if platform_filter:
-        matched = [r for r in matched if platform_filter in str(r.get("platform", "")).lower()]
 
     if not matched:
         await update.message.reply_text(f"❌ No products found for '*{update.message.text}*'", parse_mode="Markdown")
