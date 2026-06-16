@@ -5,6 +5,7 @@ import asyncio
 try:
     from dotenv import load_dotenv
     load_dotenv()
+    from product_knowledge import PRODUCT_KNOWLEDGE
 except ImportError:
     pass
 from flask import Flask, request
@@ -13,6 +14,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 import gspread
 from groq import Groq
 from oauth2client.service_account import ServiceAccountCredentials
+from product_knowledge import PRODUCT_KNOWLEDGE
 
 # ── Config ───────────────────────────────────────────────────────────────────
 TOKEN            = os.environ["TELEGRAM_TOKEN"]
@@ -96,6 +98,37 @@ def split_into_chunks(text_blocks, max_chars=3500):
     if current.strip():
         chunks.append(current.strip())
     return chunks
+
+# ── AI Natural Language ───────────────────────────────────────────────────────
+def is_health_question(text):
+    health_keywords = [
+        "sakit", "gejala", "obat", "penyakit", "keluhan", "ada",
+        "untuk", "cocok", "recommend", "suggest", "medicine", "sick",
+        "stroke", "jantung", "darah", "lever", "hati", "kolesterol",
+        "diabetes", "kanker", "luka", "infeksi", "kemoterapi",
+        "saya", "apa", "apakah", "bagaimana", "tolong", "bantu",
+        "kurang", "lelah", "lesu", "pusing", "nyeri", "radang",
+        "hepatitis", "kelelahan", "demam", "trombosit", "stamina"
+    ]
+    text_lower = text.lower()
+    # Trigger AI if more than 2 words (likely a question)
+    word_count = len(text_lower.split())
+    return any(keyword in text_lower for keyword in health_keywords) or word_count > 2
+
+async def handle_ai_question(update, text):
+    groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
+    
+    response = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        max_tokens=150,
+        messages=[
+            {"role": "system", "content": PRODUCT_KNOWLEDGE},
+            {"role": "user", "content": text}
+        ]
+    )
+    
+    reply = response.choices[0].message.content
+    await update.message.reply_text(reply)
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -228,6 +261,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ No secure data found for that key/type.")
                 return
 
+# ── AI Natural Language ───────────────────────────────────────────────────
+    if is_health_question(text):
+        print(f"DEBUG: AI triggered for: {text}")
+        await handle_ai_question(update, text)
+        return
+    else:
+        print(f"DEBUG: Product search for: {text}")
+
     # ── Product search ────────────────────────────────────────────────────────
     from rapidfuzz import fuzz
     search_parts = text.lower().split()
@@ -281,6 +322,11 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = transcription.text.strip()
     await update.message.reply_text(f"🔍 Searching for: *{text}*", parse_mode="Markdown")
 
+    # Check if health question first
+    if is_health_question(text):
+        await handle_ai_question(update, text)
+        return
+
 # Search products using transcribed text with fuzzy matching
     from rapidfuzz import fuzz
     search_parts = text.lower().split()
@@ -309,6 +355,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chunks = split_into_chunks(blocks)
     for chunk in chunks:
         await update.message.reply_text(chunk, parse_mode="Markdown")
+
 # ── Build PTB app ─────────────────────────────────────────────────────────────
 ptb_app = Application.builder().token(TOKEN).build()
 ptb_app.add_handler(CommandHandler("start",    cmd_start))
