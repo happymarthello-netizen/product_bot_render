@@ -5,3 +5,4 @@ gspread==5.12.4
 oauth2client
 groq
 rapidfuzz
+gtts

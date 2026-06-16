@@ -115,7 +115,17 @@ def is_health_question(text):
     word_count = len(text_lower.split())
     return any(keyword in text_lower for keyword in health_keywords) or word_count > 2
 
-async def handle_ai_question(update, text):
+async def send_voice_reply(update, text):
+    from gtts import gTTS
+    import os
+    tts = gTTS(text=text, lang='id')
+    voice_path = "reply.mp3"
+    tts.save(voice_path)
+    with open(voice_path, "rb") as f:
+        await update.message.reply_voice(voice=f)
+    os.remove(voice_path)
+
+async def handle_ai_question(update, text, voice_reply=False):
     groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
     
     response = groq_client.chat.completions.create(
@@ -128,7 +138,11 @@ async def handle_ai_question(update, text):
     )
     
     reply = response.choices[0].message.content
-    await update.message.reply_text(reply)
+    
+    if voice_reply:
+        await send_voice_reply(update, reply)
+    else:
+        await update.message.reply_text(reply)
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -324,10 +338,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Check if health question first
     if is_health_question(text):
-        await handle_ai_question(update, text)
+        await handle_ai_question(update, text, voice_reply=True)
         return
 
-# Search products using transcribed text with fuzzy matching
+    # Search products using transcribed text with fuzzy matching
     from rapidfuzz import fuzz
     search_parts = text.lower().split()
     records = get_products()
