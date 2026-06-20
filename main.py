@@ -52,6 +52,33 @@ def get_direct_prices():
             time.sleep(1)
     return []
 
+def save_order(order_data, telegram_user_id, telegram_username):
+    try:
+        from datetime import datetime
+        sheet = get_sheet(os.environ["ORDERS_SHEET_ID"], worksheet_index=0)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row = [
+            timestamp,
+            order_data.get("customer_name", ""),
+            order_data.get("address", ""),
+            order_data.get("phone", ""),
+            order_data.get("product", ""),
+            order_data.get("variation", ""),
+            "",
+            order_data.get("quantity", ""),
+            order_data.get("delivery_method", ""),
+            str(telegram_user_id),
+            telegram_username or "",
+            "pending"
+        ]
+        sheet.append_row(row)
+        return True
+    except Exception as e:
+        import traceback
+        logger.error(f"Save order error: {e}")
+        logger.error(traceback.format_exc())
+        return False
+
 # ── Formatters ────────────────────────────────────────────────────────────────
 def format_currency(value):
     try:
@@ -105,6 +132,53 @@ async def send_voice_reply(update, text):
         await update.message.reply_voice(voice=f)
     os.remove(voice_path)
 
+def is_order_intent(text):
+    order_keywords = [
+        "mau pesan", "mau beli", "saya pesan", "saya beli", "order",
+        "pesan", "beli", "mau order", "ambil", "checkout"
+    ]
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in order_keywords)
+
+async def extract_order_details(text):
+    groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
+    
+    extraction_prompt = """
+Anda adalah asisten yang mengekstrak informasi pesanan dari teks pelanggan.
+Ekstrak informasi berikut dari teks, dan balas HANYA dalam format JSON (tanpa markdown, tanpa penjelasan):
+
+{
+  "customer_name": "nama pelanggan atau kosong jika tidak ada",
+  "address": "alamat lengkap atau kosong jika tidak ada",
+  "phone": "nomor HP atau kosong jika tidak ada",
+  "product": "nama produk yang dipesan atau kosong jika tidak ada",
+  "variation": "variasi produk jika disebutkan atau kosong",
+  "quantity": "jumlah yang dipesan (angka) atau kosong jika tidak ada",
+  "delivery_method": "JNE/JNT/SiCepat/Gojek/Grab jika disebutkan, atau kosong jika tidak ada"
+}
+
+Jika informasi tidak disebutkan dalam teks, biarkan kosong (string kosong "").
+"""
+    
+    response = groq_client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        max_tokens=300,
+        messages=[
+            {"role": "system", "content": extraction_prompt},
+            {"role": "user", "content": text}
+        ]
+    )
+    
+    import json as json_lib
+    try:
+        result = response.choices[0].message.content.strip()
+        result = result.replace("```json", "").replace("```", "").strip()
+        print(f"DEBUG: AI extraction raw result: {result}")
+        return json_lib.loads(result)
+    except Exception as e:
+        logger.error(f"Order extraction error: {e}")
+        return {}
+    
 async def handle_ai_question(update, text, voice_reply=False):
     groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
     response = groq_client.chat.completions.create(
@@ -155,6 +229,46 @@ async def cmd_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
+    if is_order_intent(text):
+        order_data = await extract_order_details(text)
+        
+        missing = []
+        if not order_data.get("customer_name"):
+            missing.append("nama")
+        if not order_data.get("address"):
+            missing.append("alamat")
+        if not order_data.get("phone"):
+            missing.append("no HP")
+        if not order_data.get("delivery_method"):
+            missing.append("metode pengiriman (JNE/JNT/SiCepat atau Gojek/Grab untuk Jakarta)")
+
+        if missing:
+            await update.message.reply_text(
+                f"Baik! Boleh lengkapi informasi berikut: {', '.join(missing)} 😊"
+            )
+            return
+
+        telegram_user_id = update.effective_user.id
+        telegram_username = update.effective_user.username
+        success = save_order(order_data, telegram_user_id, telegram_username)
+
+        if success:
+            await update.message.reply_text(
+                f"✅ Pesanan Anda sudah saya catat!\n\n"
+                f"Nama: {order_data.get('customer_name')}\n"
+                f"Alamat: {order_data.get('address')}\n"
+                f"No HP: {order_data.get('phone')}\n"
+                f"Produk: {order_data.get('product')} ({order_data.get('variation')})\n"
+                f"Jumlah: {order_data.get('quantity')}\n"
+                f"Pengiriman: {order_data.get('delivery_method')}\n\n"
+                f"Mohon cek kembali data di atas. Jika ada yang salah, "
+                f"silakan kirim ulang dengan data yang benar.\n\n"
+                f"Tim kami akan menghubungi Anda untuk konfirmasi total harga. Terima kasih! 🙏"
+            )
+        else:
+            await update.message.reply_text("Maaf, terjadi kesalahan. Silakan coba lagi.")
+        return
+
     if is_health_question(text):
         await handle_ai_question(update, text)
         return
@@ -201,6 +315,46 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     text = transcription.text.strip()
     await update.message.reply_text(f"🔍 Searching for: *{text}*", parse_mode="Markdown")
+
+    if is_order_intent(text):
+        order_data = await extract_order_details(text)
+        
+        missing = []
+        if not order_data.get("customer_name"):
+            missing.append("nama")
+        if not order_data.get("address"):
+            missing.append("alamat")
+        if not order_data.get("phone"):
+            missing.append("no HP")
+        if not order_data.get("delivery_method"):
+            missing.append("metode pengiriman (JNE/JNT/SiCepat atau Gojek/Grab untuk Jakarta)")
+
+        if missing:
+            await update.message.reply_text(
+                f"Baik! Boleh lengkapi informasi berikut: {', '.join(missing)} 😊"
+            )
+            return
+
+        telegram_user_id = update.effective_user.id
+        telegram_username = update.effective_user.username
+        success = save_order(order_data, telegram_user_id, telegram_username)
+
+        if success:
+            await update.message.reply_text(
+                f"✅ Pesanan Anda sudah saya catat!\n\n"
+                f"Nama: {order_data.get('customer_name')}\n"
+                f"Alamat: {order_data.get('address')}\n"
+                f"No HP: {order_data.get('phone')}\n"
+                f"Produk: {order_data.get('product')} ({order_data.get('variation')})\n"
+                f"Jumlah: {order_data.get('quantity')}\n"
+                f"Pengiriman: {order_data.get('delivery_method')}\n\n"
+                f"Mohon cek kembali data di atas. Jika ada yang salah, "
+                f"silakan kirim ulang dengan data yang benar.\n\n"
+                f"Tim kami akan menghubungi Anda untuk konfirmasi total harga. Terima kasih! 🙏"
+            )
+        else:
+            await update.message.reply_text("Maaf, terjadi kesalahan. Silakan coba lagi.")
+        return
 
     if is_health_question(text):
         await handle_ai_question(update, text, voice_reply=True)
