@@ -9,10 +9,13 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 import gspread
 from groq import Groq
 from oauth2client.service_account import ServiceAccountCredentials
-from dotenv import load_dotenv
-from product_knowledge import PRODUCT_KNOWLEDGE
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
-load_dotenv()
+from product_knowledge import PRODUCT_KNOWLEDGE
 
 # ── Config ───────────────────────────────────────────────────────────────────
 TOKEN            = os.environ["TELEGRAM_TOKEN"]
